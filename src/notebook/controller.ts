@@ -10,10 +10,6 @@ export class NotebookController implements vscode.Disposable {
 
   private _executionOrder = 0;
 
-  private _executionQueue: ExecutionQueue = new ExecutionQueue({
-    executeCell: this._doExecution.bind(this)
-  });
-  
   constructor() {
     const controller = vscode.notebooks.createNotebookController(
       NotebookController.controllerId,
@@ -36,20 +32,13 @@ export class NotebookController implements vscode.Disposable {
     controller: vscode.NotebookController
   ): Promise<void> {
 
-    console.log("cells execution request");
     for (var cell of cells) {
-      console.log(cell);
-      const clearOutputExecution = controller.createNotebookCellExecution(cell);
-      clearOutputExecution.start();
-      await clearOutputExecution.clearOutput();
-      clearOutputExecution.end(undefined);
-
-      const cellExecution = controller.createNotebookCellExecution(cell);
-      this._executionQueue.queueExecution(cellExecution);
+      this._doExecution(cell, controller);
     }
   }
 
-  private async _doExecution(execution: vscode.NotebookCellExecution): Promise<void> {
+  private async _doExecution(cell: vscode.NotebookCell, controller: vscode.NotebookController): Promise<void> {
+    const execution = controller.createNotebookCellExecution(cell);
     execution.executionOrder = ++this._executionOrder;
     execution.start(Date.now());
     try {
@@ -59,7 +48,7 @@ export class NotebookController implements vscode.Disposable {
       vscode.NotebookCellOutputItem.text("Simulated notebook execution result")
       ]);
       output.metadata = { outputType: "display_data" };
-      execution.appendOutput([output]);
+      execution.replaceOutput([output]);
     }
     finally {
       execution.end(true, Date.now());
@@ -68,52 +57,5 @@ export class NotebookController implements vscode.Disposable {
 
   private async _interrupt(notebook: vscode.NotebookDocument) {
   }
-
-}
-
-interface CellExecutor {
-  executeCell(cell: vscode.NotebookCellExecution) : Promise<void>;
-}
-
-class ExecutionQueue implements vscode.Disposable {
-  private cts = new vscode.CancellationTokenSource();
-  private _queuedRequests: vscode.NotebookCellExecution[] = [];
-  private _processRequests: Subject = new Subject();
-
-  constructor(private readonly cellExecutor: CellExecutor) {
-      this.run(this.cts.token);
-  }
-
-  dispose() {
-      this.cts.cancel();
-  }
-
-  public queueExecution(cell: vscode.NotebookCellExecution) {
-    this._queuedRequests.push(cell);
-    this._processRequests.notify();
-  }
-
-  private async run(token: vscode.CancellationToken) {
-      while (true) {
-          if (token.isCancellationRequested) {
-              return;
-          }
-
-          while (true) {
-              const currentRequest = this._queuedRequests.shift();
-              if (!currentRequest) {
-                break;
-              }
-
-              await this.cellExecutor.executeCell(currentRequest);
-
-              if (token.isCancellationRequested) {
-                  return;
-              }
-          }
-
-          await this._processRequests.wait();
-      }
-   }
 
 }
